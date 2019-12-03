@@ -25,6 +25,11 @@ import numpy as np
 from time import time
 import matplotlib.pyplot as plt
 
+## flag的一些字段
+## task_index: 任务编号，task_index=0相当于server, 需要初始化参数
+## ps_host: parameter server的地址
+## worker_host: worker们的地址
+## job_name: worker还是parameter server(简称ps)
 flags = tf.app.flags
 flags.DEFINE_integer("task_index", None,
                      "Worker task index, should be >= 0. task_index=0 is "
@@ -61,11 +66,14 @@ worker_spec = FLAGS.worker_hosts.split(",")
 num_workers = len(worker_spec)
 print('{} workers defined'.format(num_workers))
 
+## ClusterSpec代表分布式计算的一系列process
+## 每个tf.train.Server都被构建在一个cluster里
 cluster = tf.train.ClusterSpec({"ps": ps_spec, "worker": worker_spec})
 
 server = tf.train.Server(cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
 
 # Parameter server will block here
+## server join 起来了
 if FLAGS.job_name == "ps":
     print('--- Parameter Server Ready ---')
     server.join()
@@ -80,6 +88,7 @@ class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
 # Split dataset between workers
+## 把数据集分成num_workers份，根据task_index取相应的数据
 train_images = np.array_split(train_images, num_workers)[FLAGS.task_index]
 train_labels = np.array_split(train_labels, num_workers)[FLAGS.task_index]
 print('Local dataset size: {}'.format(train_images.shape[0]))
@@ -88,11 +97,14 @@ print('Local dataset size: {}'.format(train_images.shape[0]))
 train_images = train_images / 255.0
 test_images = test_images / 255.0
 
+## task_index==0 代表是初始化参数的那个worker
 is_chief = (FLAGS.task_index == 0)
 
+## checkpoint我感觉是记录训练轨迹的
 checkpoint_dir='logs_dir/{}'.format(time())
 print('Checkpoint directory: ' + checkpoint_dir)
 
+## 这一步只是为了print吧
 worker_device = "/job:worker/task:%d" % FLAGS.task_index
 print('Worker device: ' + worker_device + ' - is_chief: {}'.format(is_chief))
 
@@ -101,9 +113,11 @@ with tf.device(
       tf.train.replica_device_setter(
           worker_device=worker_device,
           cluster=cluster)):
+    ## 这个global_step是用于记录已经更新过多少次的
     global_step = tf.train.get_or_create_global_step()
 
     # Define input pipeline, place these ops in the cpu
+    ## name_scope是一种更好的可视化的工具，可以把同一组东西放在一起，是一种Context Manager
     with tf.name_scope('dataset'), tf.device('/cpu:0'):
         # Placeholders for the iterator
         images_placeholder = tf.placeholder(train_images.dtype, [None, train_images.shape[1], train_images.shape[2]], name='images_placeholder')
@@ -133,6 +147,8 @@ with tf.device(
 
     # Define cross_entropy loss
     with tf.name_scope('loss'):
+        ## reduce_mean方法是指将每类的loss加在一起mean一下
+        ## 所以需要summary_average一下
         loss = tf.reduce_mean(keras.losses.sparse_categorical_crossentropy(y, predictions))
         loss_averages_op = summary_averages.apply([loss])
         # Store moving average of the loss
